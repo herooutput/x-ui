@@ -83,23 +83,45 @@ install_base() {
 
 #This function will be called when user installed x-ui out of sercurity
 config_after_install() {
-    echo -e "${yellow}出于安全考虑，安装/更新完成后需要强制修改端口与账户密码${plain}"
-    read -p "确认是否继续?[y/n]": config_confirm
-    if [[ x"${config_confirm}" == x"y" || x"${config_confirm}" == x"Y" ]]; then
-        read -p "请设置您的账户名:" config_account
-        echo -e "${yellow}您的账户名将设定为:${config_account}${plain}"
-        read -p "请设置您的账户密码:" config_password
-        echo -e "${yellow}您的账户密码将设定为:${config_password}${plain}"
-        read -p "请设置面板访问端口:" config_port
-        echo -e "${yellow}您的面板访问端口将设定为:${config_port}${plain}"
-        echo -e "${yellow}确认设定,设定中${plain}"
-        /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
-        echo -e "${yellow}账户密码设定完成${plain}"
-        /usr/local/x-ui/x-ui setting -port ${config_port}
-        echo -e "${yellow}面板端口设定完成${plain}"
-    else
-        echo -e "${red}已取消,所有设置项均为默认设置,请及时修改${plain}"
+    echo -e "${yellow}出于安全考虑，安装/更新完成后自动配置端口与账户密码${plain}"
+    
+    # 固定账号为 admin
+    config_account="admin"
+    
+    # 生成8位随机密码（大小写字母）
+    config_password=$(cat /dev/urandom | tr -dc 'a-zA-Z' | fold -w 8 | head -n 1)
+    
+    # 生成随机端口（1000-65535）
+    port_range=$((65535 - 1000 + 1))
+    # 读取2字节无符号整数，范围0-65535
+    random_value=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
+    if [[ -z "$random_value" ]]; then
+        # 如果od命令失败，使用$RANDOM组合
+        random_value=$((RANDOM * 2 + RANDOM % 2))
     fi
+    config_port=$((1000 + (random_value % port_range)))
+    
+    echo -e "${green}自动生成配置信息:${plain}"
+    echo -e "${green}账户名: ${config_account}${plain}"
+    echo -e "${green}密码: ${config_password}${plain}"
+    echo -e "${green}端口: ${config_port}${plain}"
+    echo -e "${yellow}正在配置中...${plain}"
+    
+    /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
+    echo -e "${yellow}账户密码设定完成${plain}"
+    
+    /usr/local/x-ui/x-ui setting -port ${config_port}
+    echo -e "${yellow}面板端口设定完成${plain}"
+    
+    echo -e ""
+    echo -e "${green}==============================================${plain}"
+    echo -e "${green}请保存以下登录信息:${plain}"
+    echo -e "${green}账户名: ${config_account}${plain}"
+    echo -e "${green}密码: ${config_password}${plain}"
+    echo -e "${green}端口: ${config_port}${plain}"
+    echo -e "${green}访问地址: http://您的服务器IP:${config_port}${plain}"
+    echo -e "${green}==============================================${plain}"
+    echo -e ""
 }
 
 install_x-ui() {
