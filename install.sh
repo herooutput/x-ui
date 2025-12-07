@@ -101,6 +101,26 @@ config_after_install() {
     fi
     config_port=$((1000 + (random_value % port_range)))
     
+    # 获取服务器IP地址
+    server_ip=""
+    # 优先尝试获取公网IP
+    public_ip=$(curl -s --connect-timeout 3 --max-time 5 ip.sb 2>/dev/null || curl -s --connect-timeout 3 --max-time 5 ifconfig.me 2>/dev/null || curl -s --connect-timeout 3 --max-time 5 icanhazip.com 2>/dev/null)
+    if [[ -n "$public_ip" && "$public_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        server_ip="$public_ip"
+    else
+        # 如果公网IP获取失败，获取本地IP（第一个非回环IP）
+        local_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+        if [[ -n "$local_ip" && "$local_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            server_ip="$local_ip"
+        else
+            # 如果hostname -I失败，尝试使用ip命令
+            local_ip=$(ip addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' | head -n 1)
+            if [[ -n "$local_ip" && "$local_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                server_ip="$local_ip"
+            fi
+        fi
+    fi
+    
     echo -e "${green}自动生成配置信息:${plain}"
     echo -e "${green}账户名: ${config_account}${plain}"
     echo -e "${green}密码: ${config_password}${plain}"
@@ -119,7 +139,12 @@ config_after_install() {
     echo -e "${green}账户名: ${config_account}${plain}"
     echo -e "${green}密码: ${config_password}${plain}"
     echo -e "${green}端口: ${config_port}${plain}"
-    echo -e "${green}访问地址: http://您的服务器IP:${config_port}${plain}"
+    if [[ -n "$server_ip" ]]; then
+        echo -e "${green}访问地址: http://${server_ip}:${config_port}${plain}"
+    else
+        echo -e "${yellow}访问地址: http://您的服务器IP:${config_port}${plain}"
+        echo -e "${yellow}提示: 未能自动获取IP地址，请手动替换为您的服务器IP${plain}"
+    fi
     echo -e "${green}==============================================${plain}"
     echo -e ""
 }
