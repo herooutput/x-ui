@@ -88,11 +88,12 @@ config_after_install() {
     # 固定账号为 admin
     config_account="admin"
     
-    # 生成8位随机密码（大小写字母）
-    config_password=＂HDhsjsi1256＂
+    # 生成8位随机密码（大小写字母)
+    config_password=$(cat /dev/urandom|
+tr -dc 'a-zA-Z' | fold -w 8 | head -n 1)
     
     # 生成随机端口（1000-65535）
-    port_range=56421
+    port_range=$((65535 - 1000 + 1))
     # 读取2字节无符号整数，范围0-65535
     random_value=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
     if [[ -z "$random_value" ]]; then
