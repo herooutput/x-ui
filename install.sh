@@ -7,6 +7,12 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
+# 支持通过环境变量配置
+# XUI_PORT - 面板端口
+# XUI_USERNAME - 用户名
+# XUI_PASSWORD - 密码
+# XUI_SKIP_CONFIG - 设为 1 跳过自动配置
+
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
@@ -81,59 +87,51 @@ install_base() {
     fi
 }
 
-#This function will be called when user installed x-ui out of sercurity
+# 配置函数 - 支持环境变量
 config_after_install() {
-    echo -e "${yellow}出于安全考虑，安装/更新完成后自动配置端口与账户密码${plain}"
-    
-    # 固定账号为 admin
-    config_account="admin"
-    
-    # 生成8位随机密码（大小写字母)
-    config_password=$(cat /dev/urandom|
-tr -dc 'a-zA-Z' | fold -w 8 | head -n 1)
-    
-    # 生成随机端口（1000-65535）
-    port_range=$((65535 - 1000 + 1))
-    # 读取2字节无符号整数，范围0-65535
-    random_value=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
-    if [[ -z "$random_value" ]]; then
-        # 如果od命令失败，使用$RANDOM组合
-        random_value=$((RANDOM * 2 + RANDOM % 2))
+    # 如果设置了 XUI_SKIP_CONFIG=1，跳过配置
+    if [[ "${XUI_SKIP_CONFIG}" == "1" ]]; then
+        echo -e "${yellow}跳过自动配置（XUI_SKIP_CONFIG=1）${plain}"
+        return
     fi
-    config_port=$((1000 + (random_value % port_range)))
-    
-    # 获取服务器IP地址
-    server_ip=""
-    # 优先尝试获取公网IP
-    public_ip=$(curl -s --connect-timeout 3 --max-time 5 ip.sb 2>/dev/null || curl -s --connect-timeout 3 --max-time 5 ifconfig.me 2>/dev/null || curl -s --connect-timeout 3 --max-time 5 icanhazip.com 2>/dev/null)
-    if [[ -n "$public_ip" && "$public_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        server_ip="$public_ip"
+
+    echo -e "${yellow}正在配置 x-ui...${plain}"
+
+    # 使用环境变量或生成随机值
+    if [[ -n "${XUI_USERNAME}" ]]; then
+        config_account="${XUI_USERNAME}"
     else
-        # 如果公网IP获取失败，获取本地IP（第一个非回环IP）
-        local_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-        if [[ -n "$local_ip" && "$local_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            server_ip="$local_ip"
-        else
-            # 如果hostname -I失败，尝试使用ip命令
-            local_ip=$(ip addr show 2>/dev/null | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.' | head -n 1)
-            if [[ -n "$local_ip" && "$local_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-                server_ip="$local_ip"
-            fi
-        fi
+        config_account="admin"
     fi
-    
-    echo -e "${green}自动生成配置信息:${plain}"
+
+    if [[ -n "${XUI_PASSWORD}" ]]; then
+        config_password="${XUI_PASSWORD}"
+    else
+        # 生成8位随机密码
+        config_password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 8 | head -n 1)
+    fi
+
+    if [[ -n "${XUI_PORT}" ]]; then
+        config_port="${XUI_PORT}"
+    else
+        # 生成随机端口 10000-65000
+        config_port=$((RANDOM % 55000 + 10000))
+    fi
+
+    # 获取服务器 IP
+    server_ip=$(curl -s4 ifconfig.me 2>/dev/null || curl -s4 ip.sb 2>/dev/null || echo "")
+
+    echo -e "${green}配置信息:${plain}"
     echo -e "${green}账户名: ${config_account}${plain}"
     echo -e "${green}密码: ${config_password}${plain}"
     echo -e "${green}端口: ${config_port}${plain}"
-    echo -e "${yellow}正在配置中...${plain}"
-    
+
     /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
     echo -e "${yellow}账户密码设定完成${plain}"
-    
+
     /usr/local/x-ui/x-ui setting -port ${config_port}
     echo -e "${yellow}面板端口设定完成${plain}"
-    
+
     echo -e ""
     echo -e "${green}==============================================${plain}"
     echo -e "${green}请保存以下登录信息:${plain}"
@@ -144,20 +142,19 @@ tr -dc 'a-zA-Z' | fold -w 8 | head -n 1)
         echo -e "${green}访问地址: http://${server_ip}:${config_port}${plain}"
     else
         echo -e "${yellow}访问地址: http://您的服务器IP:${config_port}${plain}"
-        echo -e "${yellow}提示: 未能自动获取IP地址，请手动替换为您的服务器IP${plain}"
     fi
     echo -e "${green}==============================================${plain}"
     echo -e ""
 }
 
 install_x-ui() {
-    systemctl stop x-ui
+    systemctl stop x-ui 2>/dev/null
     cd /usr/local/
 
     if [ $# == 0 ]; then
         last_version=$(curl -Ls "https://api.github.com/repos/vaxilu/x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 x-ui 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 x-ui 版本安装${plain}"
+            echo -e "${red}检测 x-ui 版本失败，可能是超出 Github API 限制，请稍后再试${plain}"
             exit 1
         fi
         echo -e "检测到 x-ui 最新版本：${last_version}，开始安装"
@@ -189,36 +186,27 @@ install_x-ui() {
     wget --no-check-certificate -O /usr/bin/x-ui https://raw.githubusercontent.com/vaxilu/x-ui/main/x-ui.sh
     chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
+
+    # 调用配置函数
     config_after_install
-    #echo -e "如果是全新安装，默认网页端口为 ${green}54321${plain}，用户名和密码默认都是 ${green}admin${plain}"
-    #echo -e "请自行确保此端口没有被其他程序占用，${yellow}并且确保 54321 端口已放行${plain}"
-    #    echo -e "若想将 54321 修改为其它端口，输入 x-ui 命令进行修改，同样也要确保你修改的端口也是放行的"
-    #echo -e ""
-    #echo -e "如果是更新面板，则按你之前的方式访问面板"
-    #echo -e ""
+
     systemctl daemon-reload
     systemctl enable x-ui
     systemctl start x-ui
-    echo -e "${green}x-ui v${last_version}${plain} 安装完成，面板已启动，"
+
+    echo -e "${green}x-ui v${last_version}${plain} 安装完成，面板已启动"
     echo -e ""
     echo -e "x-ui 管理脚本使用方法: "
     echo -e "----------------------------------------------"
-    echo -e "x-ui              - 显示管理菜单 (功能更多)"
+    echo -e "x-ui              - 显示管理菜单"
     echo -e "x-ui start        - 启动 x-ui 面板"
     echo -e "x-ui stop         - 停止 x-ui 面板"
     echo -e "x-ui restart      - 重启 x-ui 面板"
     echo -e "x-ui status       - 查看 x-ui 状态"
-    echo -e "x-ui enable       - 设置 x-ui 开机自启"
-    echo -e "x-ui disable      - 取消 x-ui 开机自启"
     echo -e "x-ui log          - 查看 x-ui 日志"
-    echo -e "x-ui v2-ui        - 迁移本机器的 v2-ui 账号数据至 x-ui"
-    echo -e "x-ui update       - 更新 x-ui 面板"
-    echo -e "x-ui install      - 安装 x-ui 面板"
-    echo -e "x-ui uninstall    - 卸载 x-ui 面板"
     echo -e "----------------------------------------------"
 }
 
 echo -e "${green}开始安装${plain}"
 install_base
 install_x-ui $1
-
